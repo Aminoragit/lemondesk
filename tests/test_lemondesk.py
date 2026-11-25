@@ -101,5 +101,149 @@ class TestOfflineMode(unittest.TestCase):
     def test_empty_document_rejected(self):
         with self.assertRaises(ValueError): process_document("  ")
 
+# ---------------------------------------------------------------------------
+# Regression tests added after the independent evaluation (../EVALUATION.md).
+# Each class maps to a numbered bug in that report.
+# ---------------------------------------------------------------------------
+import contextlib, io, urllib.request, urllib.error
+from urllib.parse import urlencode
+from lemondesk.cli import main as cli_main
+from lemondesk.server import make_handler
+
+class FlakyLemonade(BaseHTTPRequestHandler):
+    """Answers everything except Translate, which returns HTTP 500 (BUG-1)."""
+    def log_message(self, *a): pass
+    def _json(self, obj):
+        b = json.dumps(obj).encode(); self.send_response(200)
+        self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+    def do_GET(self):
+        if self.path.endswith("/health"): self._json({"status": "ok"})
+        elif self.path.endswith("/models"): self._json({"data": [{"id": "fake-model-1"}]})
+        else: self.send_response(404); self.end_headers()
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0)); body = json.loads(self.rfile.read(n) or b"{}")
+        prompt = body["messages"][0]["content"]
+        if prompt.startswith("Translate"):
+            b = b"flaky translate failure"; self.send_response(500)
+            self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
+        if prompt.startswith("Summarize"): content = "FAKE SUMMARY"
+        elif prompt.startswith("Extract"): content = "Do the first thing\nDo the second thing"
+        else: content = "?"
+        self._json({"choices": [{"message": {"content": content}}]})
+
+def start_flaky():
+    srv = HTTPServer(("127.0.0.1", 0), FlakyLemonade)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}/api/v1"
+
+class TestMixedModeLabelling(unittest.TestCase):
+    """BUG-1: a partial fallback must be reported as mixed, never pure real."""
+    @classmethod
+    def setUpClass(cls): cls.srv, cls.base = start_flaky()
+    @classmethod
+    def tearDownClass(cls): cls.srv.shutdown()
+    def test_partial_fallback_is_mixed_and_audited_consistently(self):
+        with tempfile.TemporaryDirectory() as d:
+            audit = AuditLog(os.path.join(d, "a.jsonl"))
+            r = process_document(EN_DOC, client=LemonadeClient(self.base, timeout=2), audit=audit)
+            self.assertEqual(r["mode"], "mixed")
+            self.assertEqual(r["task_modes"], {"summarize": "real", "translate": "demo", "actions": "real"})
+            self.assertIsNotNone(r["demo_notice"]); self.assertIn("MIXED MODE", r["demo_notice"])
+            self.assertIn("translate", r["demo_notice"])
+            self.assertTrue(r["translation"].startswith("[DEMO]"))
+            self.assertEqual(r["summary"], "FAKE SUMMARY")
+            rows = {x["task"]: x["mode"] for x in audit.read_all()}
+            self.assertEqual(rows, r["task_modes"])  # audit and result cannot disagree
+
+class CountingLemonade(FakeLemonade):
+    models_hits = 0
+    def do_GET(self):
+        if self.path.endswith("/models"): type(self).models_hits += 1
+        super().do_GET()
+
+class TestClientModelCache(unittest.TestCase):
+    """BUG-7: chat() must not re-list models on every call."""
+    @classmethod
+    def setUpClass(cls):
+        CountingLemonade.models_hits = 0
+        cls.srv = HTTPServer(("127.0.0.1", 0), CountingLemonade)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}/api/v1"
+    @classmethod
+    def tearDownClass(cls): cls.srv.shutdown()
+    def test_models_listed_once_for_repeated_chats(self):
+        c = LemonadeClient(self.base, timeout=2)
+        c.chat([{"role": "user", "content": "Summarize x"}])
+        c.chat([{"role": "user", "content": "Summarize y"}])
+        self.assertEqual(CountingLemonade.models_hits, 1)
+
+class TestDemoExtractorBareJuseyo(unittest.TestCase):
+    """BUG-4: bare 주세요/보내주세요 requests must be extracted."""
+    def test_bare_juseyo_sentence_extracted(self):
+        self.assertTrue(demo.demo_action_items("자료를 메일로 보내주세요."))
+        self.assertTrue(demo.demo_action_items("일정을 확인해 주세요."))
+    def test_project_sample_extracts_send_request(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "examples", "sample-ko.txt")
+        with open(path, encoding="utf-8") as f: sample = f.read()
+        items = demo.demo_action_items(sample)
+        self.assertTrue(any("보내주세요" in i for i in items), items)
+
+class TestCliGracefulErrors(unittest.TestCase):
+    """BUG-3 (CLI): bad input -> clear error + non-zero exit, no traceback."""
+    def test_empty_document_is_graceful(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cli_main(["--text", "   "])
+        self.assertEqual(rc, 2); self.assertIn("Error", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+    def test_unknown_approve_id_is_graceful(self):
+        with tempfile.TemporaryDirectory() as d:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                rc = cli_main(["--text", KO_DOC, "--approve", "A99",
+                               "--audit", os.path.join(d, "a.jsonl")])
+        self.assertEqual(rc, 2); self.assertIn("unknown action item ID 'A99'", err.getvalue())
+
+def start_ui(audit_path):
+    srv = HTTPServer(("127.0.0.1", 0), make_handler(audit_path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+def post_form(url, data):
+    req = urllib.request.Request(url, data=urlencode(data, doseq=True).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8")
+
+class TestServerExportTrust(unittest.TestCase):
+    """BUG-2 + BUG-3 (server): export only ever releases server-extracted items."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.srv, self.base = start_ui(os.path.join(self.tmp.name, "a.jsonl"))
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close(); self.tmp.cleanup()
+    def test_export_without_any_process_is_rejected(self):
+        status, body = post_form(self.base + "/export",
+                                 {"items": '[{"id":"X1","text":"FORGED never extracted"}]', "approve": "X1"})
+        self.assertEqual(status, 400); self.assertNotIn("Exported", body)
+    def test_forged_id_rejected_and_posted_items_ignored(self):
+        status, _ = post_form(self.base + "/process", {"text": KO_DOC})
+        self.assertEqual(status, 200)
+        status, body = post_form(self.base + "/export",
+                                 {"items": '[{"id":"X1","text":"FORGED never extracted"}]', "approve": "X1"})
+        self.assertEqual(status, 400); self.assertIn("unknown action item", body)
+        self.assertNotIn("FORGED", body)
+        # Even with a forged items field present, approving a real ID exports
+        # the SERVER-side item text, never client-supplied text.
+        status, body = post_form(self.base + "/export",
+                                 {"items": '[{"id":"A1","text":"FORGED replacement"}]', "approve": "A1"})
+        self.assertEqual(status, 200); self.assertIn("Exported 1 approved item(s)", body)
+        self.assertIn("준비해야 합니다", body); self.assertNotIn("FORGED replacement", body)
+    def test_empty_process_returns_http_400_page(self):
+        status, body = post_form(self.base + "/process", {"text": ""})
+        self.assertEqual(status, 400); self.assertIn("Error", body)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
