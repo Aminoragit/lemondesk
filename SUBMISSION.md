@@ -37,7 +37,7 @@ Demo: run `python3 -m lemondesk.cli --file examples/sample-ko.txt` (demo mode, n
 ---
 
 (The test count of 13 above was accurate at submission time; the suite has
-since grown to 22 tests during remediation — see below. The form text itself
+since grown to 26 tests during remediation — see below. The form text itself
 is a historical record and is not edited retroactively.)
 
 ## Post-submission evaluation and remediation
@@ -46,13 +46,24 @@ After submission, an **independent adversarial evaluation** scored this entry
 against the project's own submission quality checklist
 (`~/workspace/quality-gate/SUBMISSION-QUALITY-CHECKLIST.md`):
 
-- **Independent evaluation result: 58/100 — FAIL** (full report: `../EVALUATION.md`).
+- **Independent evaluation result (round 1): 58/100 — FAIL** (full report:
+  [`EVALUATION.md`](EVALUATION.md), in this repository).
   This supersedes the pre-submission self-score of 97/100, which the evaluator
   overturned as inflated — chiefly in Execution/proof (18 → 5) and Idea (14 → 5.5):
   no demo video or screenshots, no problem-size statistics, no external users,
   AMD's judging criteria never explicitly addressed, and four real bugs found
   by probing. No fabricated numbers were found; every quantitative claim that
   existed (13/13 tests, gate behaviour, audit fields, endpoints) re-verified as true.
+
+- **Independent re-evaluation result (round 2): 71/100 — FAIL** (full report:
+  [`EVALUATION-2.md`](EVALUATION-2.md), in this repository). The round-2
+  evaluator independently re-probed every round-1 bug fix (all held, including
+  a mixed-mode probe on a task the remediation's own test did not cover),
+  verified all three cited statistics at their sources, and confirmed the
+  live repository was byte-identical to the local project. Remaining
+  deductions sit almost entirely in Execution/proof: no real-hardware run,
+  no demo video, no real users. Its in-repo fix list has also been applied
+  (see the round-2 items below); the rest cannot be closed from a repository.
 
 - **Remediation in progress / applied locally (post-submission):**
   - BUG-1 (mixed-mode mislabelling): fixed — runs now report `real` / `demo` /
@@ -76,6 +87,18 @@ against the project's own submission quality checklist
     added; real web-UI screenshots (demo mode, labelled as such) embedded;
     Korean README (`README.ko.md`) added.
   - Test suite: 13 → **22 tests**, all passing (clean-copy run recorded in README).
+  - **Round-2 in-repo fixes (applied after the 71/100 re-evaluation):**
+    both evaluation reports copied into this repository and this file's
+    report references fixed to point at them; the "~700 lines" claim
+    corrected to the measured ~480 lines of source (~770 including tests);
+    an empty `--file` input now reaches the graceful "document text is
+    empty" error (exit 2, no misleading usage message); `ApprovalGate`
+    hardened in-process (items copied on construction, approved set
+    read-only); one explicit differentiation sentence naming cloud
+    alternatives added to both READMEs; "What's next" reordered so the
+    expansion logic leads; the hardware kit's `tools/benchmark.py` and
+    `tools/sample-long-ko.txt` added to the repo. Test suite: 22 → **26
+    tests**, all passing.
   - **Still open (cannot be closed from a repository alone):** a run and
     benchmark on real Lemonade / Ryzen AI hardware, a recorded demo video,
     and validation with real Korean knowledge-worker users.
