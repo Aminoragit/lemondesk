@@ -57,6 +57,33 @@ class TestApprovalGate(unittest.TestCase):
     def test_unknown_id_rejected(self):
         with self.assertRaises(KeyError): ApprovalGate(list(self.ITEMS)).approve("A99")
 
+class TestApprovalGateDefensive(unittest.TestCase):
+    """BUG-6 residual (round 2): the gate is defensive even in-process.
+
+    Mutating the caller's original list, the exposed items, or the approved
+    view must not change what export() releases; approve() is the only way in.
+    """
+    ITEMS = [{"id": "A1", "text": "x"}, {"id": "A2", "text": "y"}]
+    def test_mutating_original_list_does_not_affect_export(self):
+        items = [dict(i) for i in self.ITEMS]
+        g = ApprovalGate(items)
+        items.append({"id": "A3", "text": "injected"})
+        items[0]["text"] = "tampered"
+        g.approve("A1")
+        self.assertEqual(g.export(), [{"id": "A1", "text": "x"}])
+        with self.assertRaises(KeyError): g.approve("A3")
+    def test_mutating_exposed_items_does_not_affect_export(self):
+        g = ApprovalGate([dict(i) for i in self.ITEMS])
+        g.items.append({"id": "A9", "text": "injected"})
+        g.items[0]["text"] = "tampered"
+        g.approve("A1")
+        self.assertEqual(g.export(), [{"id": "A1", "text": "x"}])
+    def test_approved_set_is_not_publicly_mutable(self):
+        g = ApprovalGate([dict(i) for i in self.ITEMS])
+        with self.assertRaises(AttributeError): g.approved.add("A1")
+        with self.assertRaises(AttributeError): g.approved = {"A1"}
+        self.assertEqual(g.export(), [])
+
 class TestAudit(unittest.TestCase):
     def test_audit_written_with_hash_and_mode(self):
         with tempfile.TemporaryDirectory() as d:
@@ -195,6 +222,18 @@ class TestCliGracefulErrors(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             rc = cli_main(["--text", "   "])
         self.assertEqual(rc, 2); self.assertIn("Error", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+    def test_empty_file_is_graceful(self):
+        # Round-2 nit: an empty --file must report "document text is empty",
+        # not the misleading argparse "provide --file or --text" message.
+        with tempfile.TemporaryDirectory() as d:
+            empty = os.path.join(d, "empty.txt")
+            with open(empty, "w", encoding="utf-8") as f: f.write("  \n")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = cli_main(["--file", empty, "--audit", os.path.join(d, "a.jsonl")])
+        self.assertEqual(rc, 2); self.assertIn("document text is empty", err.getvalue())
+        self.assertNotIn("provide --file", err.getvalue())
         self.assertNotIn("Traceback", err.getvalue())
     def test_unknown_approve_id_is_graceful(self):
         with tempfile.TemporaryDirectory() as d:
