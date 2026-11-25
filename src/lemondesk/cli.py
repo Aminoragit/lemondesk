@@ -31,8 +31,11 @@ def main(argv=None) -> int:
             return 2
     else:
         text = a.text or ""
-    if not text:
+    if a.file is None and a.text is None:
         p.error("provide --file or --text (or --check)")
+    # An empty/whitespace document (from --file or --text) falls through to
+    # process_document below, whose ValueError is reported gracefully as
+    # "document text is empty" — not as a misleading argparse usage error.
     # Graceful errors, no tracebacks (BUG-3 fix): bad input is a user error,
     # reported as a clear message with a non-zero exit code.
     try:

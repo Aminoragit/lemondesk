@@ -21,17 +21,32 @@ PROMPTS = {
 }
 
 class ApprovalGate:
-    """Structural human-approval gate. Export is impossible without approvals."""
+    """Structural human-approval gate. Export is impossible without approvals.
+
+    Defensive in-process (round-2 evaluation, BUG-6 residual): the gate copies
+    the items on construction and keeps its state private. Mutating the
+    caller's original list, the list/dicts handed out via ``items``, or the
+    read-only ``approved`` view cannot change what ``export()`` releases —
+    the only way in is ``approve()``.
+    """
     def __init__(self, items: list):
-        self.items = items  # each: {"id": str, "text": str}
-        self.approved: set = set()
+        self.__items = [dict(i) for i in items]  # each: {"id": str, "text": str}
+        self.__approved: set = set()
+    @property
+    def items(self) -> list:
+        """A copy of the gated items; mutating it does not affect the gate."""
+        return [dict(i) for i in self.__items]
+    @property
+    def approved(self) -> frozenset:
+        """Read-only view of the approved item IDs."""
+        return frozenset(self.__approved)
     def approve(self, item_id: str) -> None:
-        if item_id not in {i["id"] for i in self.items}:
+        if item_id not in {i["id"] for i in self.__items}:
             raise KeyError(f"unknown action item id: {item_id}")
-        self.approved.add(item_id)
+        self.__approved.add(item_id)
     def export(self) -> list:
         """Returns ONLY approved items. With zero approvals this returns []."""
-        return [i for i in self.items if i["id"] in self.approved]
+        return [dict(i) for i in self.__items if i["id"] in self.__approved]
     def export_json(self) -> str:
         return json.dumps(self.export(), ensure_ascii=False, indent=2)
 
