@@ -16,6 +16,7 @@ class LemonadeClient:
     def __init__(self, base_url: str = DEFAULT_BASE, timeout: float = 5.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._models_cache: list | None = None  # populated by list_models()
 
     def _root(self) -> str:
         return self.base_url[:-len("/api/v1")] if self.base_url.endswith("/api/v1") else self.base_url
@@ -38,6 +39,7 @@ class LemonadeClient:
                 return True
             except Exception:
                 continue
+        # Fall back to /models as a liveness probe (some builds expose only /api/v1/*).
         try:
             self.list_models()
             return True
@@ -50,15 +52,29 @@ class LemonadeClient:
         except Exception as e:
             raise LemonadeUnavailable(f"cannot reach Lemonade at {self.base_url}: {e}") from e
         if isinstance(data, dict) and isinstance(data.get("data"), list):
-            return [m.get("id", str(m)) if isinstance(m, dict) else str(m) for m in data["data"]]
-        if isinstance(data, list):
-            return [m.get("id", str(m)) if isinstance(m, dict) else str(m) for m in data]
-        return []
+            models = [m.get("id", str(m)) if isinstance(m, dict) else str(m) for m in data["data"]]
+        elif isinstance(data, list):
+            models = [m.get("id", str(m)) if isinstance(m, dict) else str(m) for m in data]
+        else:
+            models = []
+        self._models_cache = models
+        return models
+
+    def _cached_models(self) -> list:
+        """Model list without a network round-trip when already fetched.
+
+        chat() calls this so processing one document (3 chat calls) costs at
+        most one /models request instead of one per call (BUG-7 fix). Call
+        list_models() directly to force a refresh.
+        """
+        if self._models_cache is None:
+            return self.list_models()
+        return self._models_cache
 
     def chat(self, messages: list, model: str | None = None) -> tuple:
         """Returns (text, model_used). Raises LemonadeUnavailable if unreachable."""
         if model is None:
-            models = self.list_models()
+            models = self._cached_models()
             if not models:
                 raise LemonadeUnavailable("Lemonade is running but reports no models")
             model = models[0]

@@ -23,10 +23,23 @@ def main(argv=None) -> int:
             try: print("Models:", ", ".join(client.list_models()) or "(none reported)")
             except LemonadeUnavailable as e: print("Models: unavailable -", e)
         return 0
-    text = open(a.file, encoding="utf-8").read() if a.file else (a.text or "")
+    if a.file:
+        try:
+            text = open(a.file, encoding="utf-8").read()
+        except OSError as e:
+            print(f"Error: cannot read file '{a.file}': {e}", file=sys.stderr)
+            return 2
+    else:
+        text = a.text or ""
     if not text:
         p.error("provide --file or --text (or --check)")
-    result = process_document(text, client=client, audit=AuditLog(a.audit))
+    # Graceful errors, no tracebacks (BUG-3 fix): bad input is a user error,
+    # reported as a clear message with a non-zero exit code.
+    try:
+        result = process_document(text, client=client, audit=AuditLog(a.audit))
+    except ValueError as e:
+        print(f"Error: {e}. Provide a non-empty document.", file=sys.stderr)
+        return 2
     if result["demo_notice"]: print("⚠ " + result["demo_notice"])
     print(f"Mode: {result['mode']} | Model: {result['model']} | {result['source_language']} -> {result['target_language']}")
     print("\n== Summary ==\n" + result["summary"])
@@ -35,7 +48,12 @@ def main(argv=None) -> int:
     for i in result["action_items"]: print(f"  {i['id']}: {i['text']}")
     gate = ApprovalGate(result["action_items"])
     for item_id in [x.strip() for x in a.approve.split(",") if x.strip()]:
-        gate.approve(item_id)
+        try:
+            gate.approve(item_id)
+        except KeyError:
+            valid = ", ".join(i["id"] for i in result["action_items"]) or "(none)"
+            print(f"Error: unknown action item ID '{item_id}'. Valid IDs: {valid}. Nothing was exported.", file=sys.stderr)
+            return 2
     exported = gate.export()
     print(f"\nApproved: {len(gate.approved)} | Exported: {len(exported)}")
     if a.export:

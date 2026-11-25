@@ -1,4 +1,13 @@
-"""Deterministic OFFLINE/DEMO fallback. NOT a model. Output is always labelled DEMO."""
+"""Deterministic OFFLINE/DEMO fallback. NOT a model. Output is always labelled DEMO.
+
+Strategies (deterministic, no randomness, no network):
+- summarize: extractive — the first 3 sentences of the document, joined in order
+  (see demo_summarize; it does not look at paragraphs at all).
+- translate: sentence-level glossary substitution for a small fixed KO<->EN glossary,
+  otherwise the source sentence is returned prefixed with [DEMO-untranslated].
+- action items: lines/sentences matching explicit request/task markers (TODO, 해야,
+  해주세요, bare 주세요/보내주세요-style requests, please, deadline, 마감, etc.).
+"""
 from __future__ import annotations
 import re
 
@@ -10,6 +19,9 @@ GLOSSARY_EN_KO = {
 GLOSSARY_KO_EN = {v: k for k, v in GLOSSARY_EN_KO.items()}
 ACTION_PATTERNS = [
     r"TODO[:\s].+", r".*해야 합니다.*", r".*해주세요.*", r".*해 주세요.*",
+    # Bare polite requests (BUG-4 fix): "보내주세요", "확인해 주세요" without the
+    # "해" — e.g. the project's own sample "검토 보고서를 팀에 보내주세요" was missed.
+    r".*주세요.*", r".*주십시오.*", r".*주시기 바랍니다.*",
     r"(?i).*please .+", r"(?i).*deadline.*", r".*마감.*", r"(?i).*action item.*",
 ]
 
