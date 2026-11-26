@@ -65,6 +65,16 @@ against the project's own submission quality checklist
   no demo video, no real users. Its in-repo fix list has also been applied
   (see the round-2 items below); the rest cannot be closed from a repository.
 
+- **Independent re-evaluation result (round 3): 81.5/100 — FAIL** (full
+  report: [`EVALUATION-3.md`](EVALUATION-3.md), in this repository). After
+  the real-server run, real-mode captures, and the demo video, the
+  evaluator lifted the "AI decorative" caveat entirely and raised
+  Execution/proof from 6.5 to 11/20. Its one new evidence finding — the
+  benchmark tool discarded its raw audit log — was fixed the same day
+  (the tool now persists `BENCHMARK-AUDIT.jsonl`). What remains is not
+  fixable from a repository: a Ryzen AI-hardware benchmark, real-user
+  validation, and AMD's eligibility-confirmation reply.
+
 - **Remediation in progress / applied locally (post-submission):**
   - BUG-1 (mixed-mode mislabelling): fixed — runs now report `real` / `demo` /
     `mixed` from per-task outcomes, with the fallen-back tasks named in the
