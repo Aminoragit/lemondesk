@@ -37,7 +37,7 @@ Demo: run `python3 -m lemondesk.cli --file examples/sample-ko.txt` (demo mode, n
 ---
 
 (The test count of 13 above was accurate at submission time; the suite has
-since grown to 26 tests during remediation — see below. The form text itself
+since grown to 29 tests during remediation — see below. The form text itself
 is a historical record and is not edited retroactively.)
 
 ## Post-submission evaluation and remediation
@@ -90,7 +90,8 @@ against the project's own submission quality checklist
   - **Round-2 in-repo fixes (applied after the 71/100 re-evaluation):**
     both evaluation reports copied into this repository and this file's
     report references fixed to point at them; the "~700 lines" claim
-    corrected to the measured ~480 lines of source (~770 including tests);
+    corrected to the measured ~480 lines of source (~770 including tests
+    at that time; ~490 / ~830 after the 2026-11-26 additions);
     an empty `--file` input now reaches the graceful "document text is
     empty" error (exit 2, no misleading usage message); `ApprovalGate`
     hardened in-process (items copied on construction, approved set
@@ -99,6 +100,14 @@ against the project's own submission quality checklist
     expansion logic leads; the hardware kit's `tools/benchmark.py` and
     `tools/sample-long-ko.txt` added to the repo. Test suite: 22 → **26
     tests**, all passing.
+  - **Real-server run (2026-11-26):** the full workflow ran end-to-end
+    against a real Lemonade server (2026.48.3, Qwen3-4B-GGUF, llamacpp/CUDA
+    on an NVIDIA Tesla T4 in a free cloud GPU runtime) — all runs
+    `mode: real`, benchmark and raw audit evidence in
+    `docs/BENCHMARK-RESULT.md` and `docs/evidence/`. The run exposed two
+    further compatibility bugs (5 s chat timeout; `model_name` model-list
+    field), both fixed with regression tests. Test suite: 26 → **29
+    tests**, all passing.
   - **Still open (cannot be closed from a repository alone):** a run and
-    benchmark on real Lemonade / Ryzen AI hardware, a recorded demo video,
+    benchmark on Ryzen AI hardware specifically, a recorded demo video,
     and validation with real Korean knowledge-worker users.
