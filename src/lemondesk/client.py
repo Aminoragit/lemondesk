@@ -13,9 +13,17 @@ class LemonadeUnavailable(Exception):
     pass
 
 class LemonadeClient:
-    def __init__(self, base_url: str = DEFAULT_BASE, timeout: float = 5.0):
+    def __init__(self, base_url: str = DEFAULT_BASE, timeout: float = 5.0,
+                 chat_timeout: float = 300.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        # Chat completions on real local models routinely take far longer
+        # than a health probe (a 4B model translating a full document can
+        # need tens of seconds). Probes keep the short timeout; generation
+        # gets its own generous one, so a slow-but-working server is never
+        # misreported as unavailable (which would silently trigger the
+        # demo fallback and corrupt the result's mode).
+        self.chat_timeout = chat_timeout
         self._models_cache: list | None = None  # populated by list_models()
 
     def _root(self) -> str:
@@ -26,10 +34,10 @@ class LemonadeClient:
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 
-    def _post(self, url: str, payload: dict):
+    def _post(self, url: str, payload: dict, timeout: float | None = None):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
+        with urllib.request.urlopen(req, timeout=self.timeout if timeout is None else timeout) as r:
             return json.loads(r.read().decode("utf-8"))
 
     def health(self) -> bool:
@@ -51,10 +59,16 @@ class LemonadeClient:
             data = self._get(f"{self.base_url}/models")
         except Exception as e:
             raise LemonadeUnavailable(f"cannot reach Lemonade at {self.base_url}: {e}") from e
+        def _name(m):
+            if not isinstance(m, dict):
+                return str(m)
+            # Lemonade builds differ: older ones report "id" (OpenAI shape),
+            # 2026 builds report "model_name". Accept either.
+            return m.get("id") or m.get("model_name") or m.get("name") or str(m)
         if isinstance(data, dict) and isinstance(data.get("data"), list):
-            models = [m.get("id", str(m)) if isinstance(m, dict) else str(m) for m in data["data"]]
+            models = [_name(m) for m in data["data"]]
         elif isinstance(data, list):
-            models = [m.get("id", str(m)) if isinstance(m, dict) else str(m) for m in data]
+            models = [_name(m) for m in data]
         else:
             models = []
         self._models_cache = models
@@ -80,7 +94,8 @@ class LemonadeClient:
             model = models[0]
         try:
             data = self._post(f"{self.base_url}/chat/completions",
-                              {"model": model, "messages": messages, "temperature": 0.2})
+                              {"model": model, "messages": messages, "temperature": 0.2},
+                              timeout=self.chat_timeout)
         except Exception as e:
             raise LemonadeUnavailable(f"chat completion failed: {e}") from e
         try:
