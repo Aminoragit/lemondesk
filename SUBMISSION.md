@@ -74,6 +74,11 @@ against the project's own submission quality checklist
   (the tool now persists `BENCHMARK-AUDIT.jsonl`). What remains is not
   fixable from a repository: a Ryzen AI-hardware benchmark, real-user
   validation, and AMD's eligibility-confirmation reply.
+- **Community post (2026-11-26):** the project was announced in the
+  Lemonade Discord server's #amddevchallenge channel (posted by the author,
+  2026-11-26 11:10 KST) with the benchmark, demo video, and a call for
+  Korean-speaking testers. An eligibility-confirmation email was also sent
+  to ai_dev_program@amd.com the same day; any reply will be filed here.
 
 - **Remediation in progress / applied locally (post-submission):**
   - BUG-1 (mixed-mode mislabelling): fixed — runs now report `real` / `demo` /
