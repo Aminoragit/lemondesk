@@ -34,7 +34,6 @@ import argparse
 import os
 import platform
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -76,6 +75,12 @@ def main(argv=None) -> int:
                    help="repeat each document this many times and report "
                         "every run (default 1; use 2-3 on real hardware and "
                         "ignore the first, cold-start run)")
+    p.add_argument("--audit-out", default=None,
+                   help="where to persist the raw audit JSONL for these runs "
+                        "(default: BENCHMARK-AUDIT.jsonl next to --output). "
+                        "The audit rows are the raw evidence behind every "
+                        "number in the result file, so they are kept, not "
+                        "thrown away (round-3 evaluation finding).")
     a = p.parse_args(argv)
     if a.runs < 1:
         p.error("--runs must be >= 1")
@@ -112,37 +117,40 @@ def main(argv=None) -> int:
         except Exception:
             models = []
 
+    audit_path = a.audit_out or os.path.join(
+        os.path.dirname(os.path.abspath(a.output)), "BENCHMARK-AUDIT.jsonl")
+    if os.path.exists(audit_path):
+        os.remove(audit_path)  # fresh evidence for THIS benchmark session only
+
     results = []  # one dict per (document, run)
-    with tempfile.TemporaryDirectory() as td:
-        audit_path = os.path.join(td, "benchmark-audit.jsonl")
-        for label, path in docs:
-            text = open(path, encoding="utf-8").read()
-            for run_no in range(1, a.runs + 1):
-                audit = AuditLog(audit_path)
-                before = len(audit.read_all())
-                start = time.perf_counter()
-                result = process_document(text, client=client, audit=audit)
-                wall_s = time.perf_counter() - start
-                rows = audit.read_all()[before:]
-                per_task = {}
-                for r in rows:
-                    per_task[r["task"]] = {
-                        "latency_ms": r["latency_ms"], "mode": r["mode"],
-                        "model": r["model"],
-                    }
-                results.append({
-                    "label": label, "run": run_no, "chars": len(text),
-                    "wall_s": wall_s, "mode": result["mode"],
-                    "task_modes": result["task_modes"],
-                    "model": result["model"],
-                    "summary_chars": len(result["summary"]),
-                    "translation_chars": len(result["translation"]),
-                    "action_items": len(result["action_items"]),
-                    "per_task": per_task, "audit_rows": len(rows),
-                })
-                print(f"[{label} / run {run_no}] mode={result['mode']} "
-                      f"model={result['model']} wall={wall_s:.2f}s "
-                      f"audit_rows={len(rows)}")
+    for label, path in docs:
+        text = open(path, encoding="utf-8").read()
+        for run_no in range(1, a.runs + 1):
+            audit = AuditLog(audit_path)
+            before = len(audit.read_all())
+            start = time.perf_counter()
+            result = process_document(text, client=client, audit=audit)
+            wall_s = time.perf_counter() - start
+            rows = audit.read_all()[before:]
+            per_task = {}
+            for r in rows:
+                per_task[r["task"]] = {
+                    "latency_ms": r["latency_ms"], "mode": r["mode"],
+                    "model": r["model"],
+                }
+            results.append({
+                "label": label, "run": run_no, "chars": len(text),
+                "wall_s": wall_s, "mode": result["mode"],
+                "task_modes": result["task_modes"],
+                "model": result["model"],
+                "summary_chars": len(result["summary"]),
+                "translation_chars": len(result["translation"]),
+                "action_items": len(result["action_items"]),
+                "per_task": per_task, "audit_rows": len(rows),
+            })
+            print(f"[{label} / run {run_no}] mode={result['mode']} "
+                  f"model={result['model']} wall={wall_s:.2f}s "
+                  f"audit_rows={len(rows)}")
 
     overall_mode = ("real" if all(r["mode"] == "real" for r in results)
                     else "demo" if all(r["mode"] == "demo" for r in results)
@@ -157,6 +165,8 @@ def main(argv=None) -> int:
     lines.append(f"- **Server reachable (health check):** {'yes' if reachable else 'NO'}")
     lines.append(f"- **Models reported by server:** {', '.join(models) if models else '(none / unreachable)'}")
     lines.append(f"- **Overall mode:** **{overall_mode}**")
+    lines.append(f"- **Raw audit evidence:** `{os.path.basename(audit_path)}` "
+                 "(persisted next to this file; publish both together)")
     lines.append("")
     if overall_mode != "real":
         lines.append("> ⚠️ **WARNING — NOT REAL-HARDWARE RESULTS.** This run's mode is "
@@ -211,8 +221,10 @@ def main(argv=None) -> int:
                  "`docs/BENCHMARK-RESULT.md`) or attach it to the README update, "
                  "exactly as measured — do not round away the slow cold-start run; "
                  "label it instead.")
-    lines.append("3. Keep the audit JSONL from the same session if you can — it is "
-                 "the raw evidence behind every number above.")
+    lines.append(f"3. The raw audit JSONL for this session was saved to "
+                 f"`{os.path.basename(audit_path)}` next to this file — it is "
+                 "the raw evidence behind every number above; publish it "
+                 "together with this result (e.g. under `docs/evidence/`).")
     lines.append("")
 
     with open(a.output, "w", encoding="utf-8") as f:
