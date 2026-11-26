@@ -284,5 +284,54 @@ class TestServerExportTrust(unittest.TestCase):
         status, body = post_form(self.base + "/process", {"text": ""})
         self.assertEqual(status, 400); self.assertIn("Error", body)
 
+import time as _time
+
+class SlowLemonade(FakeLemonade):
+    """Fake server whose chat completions take 0.8s — slower than a short
+    probe timeout, like a real local model generating a full translation."""
+    def do_POST(self):
+        _time.sleep(0.8)
+        super().do_POST()
+
+class TestChatTimeoutSeparateFromProbeTimeout(unittest.TestCase):
+    """Regression: a slow-but-working server must not be misread as
+    unavailable just because generation outlasts the probe timeout."""
+    @classmethod
+    def setUpClass(cls):
+        from http.server import ThreadingHTTPServer
+        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), SlowLemonade)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}/api/v1"
+    @classmethod
+    def tearDownClass(cls): cls.srv.shutdown()
+    def test_slow_chat_succeeds_with_default_chat_timeout(self):
+        client = LemonadeClient(self.base, timeout=0.3)  # chat_timeout stays 300s
+        text, model = client.chat([{"role": "user", "content": "Summarize x"}])
+        self.assertEqual(text, "FAKE SUMMARY"); self.assertEqual(model, "fake-model-1")
+    def test_slow_chat_fails_when_chat_timeout_is_short(self):
+        client = LemonadeClient(self.base, timeout=0.3, chat_timeout=0.2)
+        with self.assertRaises(Exception):
+            client.chat([{"role": "user", "content": "Summarize x"}])
+
+class ModelNameLemonade(FakeLemonade):
+    """2026 Lemonade shape: /models entries carry model_name, not id."""
+    def do_GET(self):
+        if self.path.endswith("/models"):
+            self._json({"data": [{"model_name": "Qwen3-4B-GGUF", "recipe": "llamacpp", "status": "loaded"}]})
+        else:
+            super().do_GET()
+
+class TestModelNameField(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.srv = HTTPServer(("127.0.0.1", 0), ModelNameLemonade)
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}/api/v1"
+    @classmethod
+    def tearDownClass(cls): cls.srv.shutdown()
+    def test_model_name_extracted_not_dict_repr(self):
+        client = LemonadeClient(self.base)
+        self.assertEqual(client.list_models(), ["Qwen3-4B-GGUF"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
