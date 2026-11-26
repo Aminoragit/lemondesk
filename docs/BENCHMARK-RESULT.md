@@ -103,3 +103,7 @@ fake server could have caught — both fixed with regression tests (suite: 29 te
 Also observed in the field: this Lemonade build has no `/health` endpoint
 (the client's `/models` liveness fallback covers it), and the Debian package
 targets Debian 13 — on Ubuntu 24.04 the embeddable tarball is the working install.
+
+## Evidence note (added 2026-11-26, round-3 evaluation finding)
+
+The benchmark tool originally wrote its audit log to a temporary directory that was deleted when it exited, so the raw audit rows behind the four runs above were not preserved — only this table (whose four wall-clock totals each equal the sum of their per-task audit latencies, an internal-consistency check the round-3 evaluator re-verified). The preserved raw evidence in `docs/evidence/` covers the same-day CLI and web-UI runs against the same server. The tool now persists its audit JSONL (`BENCHMARK-AUDIT.jsonl`, `--audit-out`) alongside the result, so the next run — the Ryzen AI one — will ship with its full raw evidence chain.
