@@ -108,6 +108,10 @@ against the project's own submission quality checklist
     further compatibility bugs (5 s chat timeout; `model_name` model-list
     field), both fixed with regression tests. Test suite: 26 → **29
     tests**, all passing.
+  - **Demo video (2026-11-26):** a narrated 1m38s demo built entirely from
+    the real run's captures, the real CLI output, and the measured
+    benchmark was published with release v0.3.0; real-mode web UI captures
+    were added to `docs/screenshots/` (04–06).
   - **Still open (cannot be closed from a repository alone):** a run and
-    benchmark on Ryzen AI hardware specifically, a recorded demo video,
-    and validation with real Korean knowledge-worker users.
+    benchmark on Ryzen AI hardware specifically, and validation with real
+    Korean knowledge-worker users.
